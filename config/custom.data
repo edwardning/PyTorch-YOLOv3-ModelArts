@@ -1,0 +1,4 @@
+classes= 44
+train=src_yolov3/config/train.txt
+valid=src_yolov3/config/valid.txt
+names=src_yolov3/config/train_classes.txt

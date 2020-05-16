@@ -1,0 +1,83 @@
+{
+    "model_type": "PyTorch",
+    "runtime": "python3.6",
+    "model_algorithm": "object_detection",
+    "metrics": {
+        "f1": 0.0,
+        "accuracy": 0.0,
+        "precision": 0.0,
+        "recall": 0.0
+    },
+    "apis": [{
+        "protocol": "https",
+        "url": "/",
+        "method": "post",
+        "request": {
+            "Content-type": "multipart/form-data",
+            "data": {
+                "type": "object",
+                "properties": {
+                    "images": {
+                        "type": "file"
+                    }
+                }
+            }
+        },
+        "response": {
+            "Content-type": "multipart/form-data",
+            "data": {
+                "type": "object",
+                "properties": {
+                    "detection_classes": {
+                        "type": "list",
+                        "items": [{
+                            "type": "string"
+                        }]
+                    },
+                    "detection_scores": {
+                        "type": "list",
+                        "items": [{
+                            "type": "number"
+                        }]
+                    },
+                    "detection_boxes": {
+                        "type": "list",
+                        "items": [{
+                            "type": "list",
+                            "minItems": 4,
+                            "maxItems": 4,
+                            "items": [{
+                                "type": "number"
+                            }]
+                        }]
+                    }
+                }
+            }
+        }
+    }],
+    "dependencies": [{
+        "installer": "pip",
+        "packages": [
+            {
+                "restraint": "EXACT",
+                "package_version": "5.2.0",
+                "package_name": "Pillow"
+            },
+            {
+                "restraint": "EXACT",
+                "package_version": "1.3.1",
+                "package_name": "torch"
+            },
+            {
+                "restraint": "EXACT",
+                "package_version": "4.32.1",
+                "package_name": "tqdm"
+            },
+            {
+                "restraint": "EXACT",
+                "package_version": "0.4.2",
+                "package_name": "torchvision"
+            }
+        ]
+    }]
+}
