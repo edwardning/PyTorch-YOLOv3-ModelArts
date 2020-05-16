@@ -149,7 +149,7 @@ if __name__ == "__main__":
         collate_fn=dataset.collate_fn,
     )
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=opt.lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20)
 
     metrics = [
