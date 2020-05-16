@@ -90,7 +90,8 @@ def gen_model_dir(args, model_best_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs", type=int, default=100, help="number of epochs")
+    parser.add_argument("--epochs", type=int, default=60, help="number of epochs")
+    parser.add_argument("--lr", type=float, default=1e-4, help="initial learning rate")
     parser.add_argument("--batch_size", type=int, default=32, help="size of each image batch")
     parser.add_argument("--gradient_accumulations", type=int, default=2, help="number of gradient accums before step")
     parser.add_argument("--model_def", type=str, default="PyTorch-YOLOv3-ModelArts/config/yolov3-44.cfg", help="path to model definition file")
@@ -148,7 +149,8 @@ if __name__ == "__main__":
         collate_fn=dataset.collate_fn,
     )
 
-    optimizer = torch.optim.Adam(model.parameters())
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20)
 
     metrics = [
         "grid_size",
@@ -262,5 +264,8 @@ if __name__ == "__main__":
                 model_best['mAP'] = AP.mean()
                 model_best['name'] = ckpt_name
 
-    gen_model_dir(opt, model_best['name'])
+        scheduler.step(epoch)
 
+        print('The current learning rate is: ', scheduler.get_lr()[0])
+
+    gen_model_dir(opt, model_best['name'])
