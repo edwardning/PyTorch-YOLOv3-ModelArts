@@ -19,14 +19,11 @@ from torch.utils.data import DataLoader
 from torchvision import datasets
 from torchvision import transforms
 from torch.autograd import Variable
-import torch.optim as optim
 
 try:
     import moxing as mox
 except:
     print('not use moxing')
-import xml.etree.ElementTree as ET
-import shutil
 
 
 def prepare_data_on_modelarts(args):
@@ -88,10 +85,143 @@ def gen_model_dir(args, model_best_path):
     print('gen_model_dir success, model dir is at', os.path.join(args.train_url, 'model'))
 
 
+def freeze_body(model, freeze_body):
+    # input: freeze_body.type = int, .choose = 0, 1, 2
+    # return: modified model.parameters()
+    # notes:
+    #   0: do not freeze any layers
+    #   1: freeze Darknet53 only
+    #   2: freeze all but three detection layers
+    #   three detection layers is [81, 93, 105], refer to https://blog.csdn.net/litt1e/article/details/88907542
+
+    for name, value in model.named_parameters():
+        value.requires_grad = True
+
+    if freeze_body == 0:
+        print('using original model without any freeze body')
+    elif freeze_body == 1:
+        print('using fitting model with backbone(Darknet53) frozen')
+        for name, value in model.named_parameters():
+            layers = int(name.split('.')[1])
+            if layers < 74:
+                value.requires_grad = False
+    elif freeze_body == 2:
+        print('using fitting model with all but three detection layers frozen')
+        for name, value in model.named_parameters():
+            layers = int(name.split('.')[1])
+            if layers not in [81, 93, 105]:
+                value.requires_grad = False
+    else:
+        print('Type error for freeze_body. Thus no layer is frozen')
+
+    new_params = filter(lambda p: p.requires_grad, model.parameters())
+    return new_params
+
+
+def train(model, dataloader, optimizer, epoch, opt, device):
+    model.train()
+    start_time = time.time()
+    metrics = [
+        "grid_size",
+        "loss",
+        "x",
+        "y",
+        "w",
+        "h",
+        "conf",
+        "cls",
+        "cls_acc",
+        "recall50",
+        "recall75",
+        "precision",
+        "conf_obj",
+        "conf_noobj",
+    ]
+    for batch_i, (_, imgs, targets) in enumerate(dataloader):
+        batches_done = len(dataloader) * epoch + batch_i
+
+        imgs = Variable(imgs.to(device))
+        targets = Variable(targets.to(device), requires_grad=False)
+
+        loss, outputs = model(imgs, targets)
+        loss.backward()
+
+        if batches_done % opt.gradient_accumulations:
+            # Accumulates gradient before each step
+            optimizer.step()
+            optimizer.zero_grad()
+
+        #   Log progress
+        log_str = "\n---- [Epoch %d/%d, Batch %d/%d] ----\n" % (epoch, opt.max_epochs_2, batch_i, len(dataloader))
+        metric_table = [["Metrics", *[f"YOLO Layer {i}" for i in range(len(model.yolo_layers))]]]
+
+        # Log metrics at each YOLO layer
+        for i, metric in enumerate(metrics):
+            formats = {m: "%.6f" for m in metrics}
+            formats["grid_size"] = "%2d"
+            formats["cls_acc"] = "%.2f%%"
+            row_metrics = [formats[metric] % yolo.metrics.get(metric, 0) for yolo in model.yolo_layers]
+            metric_table += [[metric, *row_metrics]]
+
+            '''
+            # Tensorboard logging
+            tensorboard_log = []
+            for j, yolo in enumerate(model.yolo_layers):
+                for name, metric in yolo.metrics.items():
+                    if name != "grid_size":
+                        tensorboard_log += [(f"{name}_{j+1}", metric)]
+            tensorboard_log += [("loss", loss.item())]
+            logger.list_of_scalars_summary(tensorboard_log, batches_done)
+            '''
+
+        log_str += AsciiTable(metric_table).table
+        log_str += f"\nTotal loss {loss.item()}"
+
+        # Determine approximate time left for epoch
+        epoch_batches_left = len(dataloader) - (batch_i + 1)
+        time_left = datetime.timedelta(seconds=epoch_batches_left * (time.time() - start_time) / (batch_i + 1))
+        log_str += f"\n---- ETA {time_left}"
+
+        print(log_str)
+
+        model.seen += imgs.size(0)
+
+
+def valid(model, path, class_names, opt):
+    print("\n---- Evaluating Model ----")
+    # Evaluate the model on the validation set
+    precision, recall, AP, f1, ap_class = evaluate(
+        model,
+        path=path,
+        iou_thres=0.5,
+        conf_thres=0.5,
+        nms_thres=0.5,
+        img_size=opt.img_size,
+        batch_size=32,
+    )
+    evaluation_metrics = [
+        ("val_precision", precision.mean()),
+        ("val_recall", recall.mean()),
+        ("val_mAP", AP.mean()),
+        ("val_f1", f1.mean()),
+    ]
+    # logger.list_of_scalars_summary(evaluation_metrics, epoch)
+
+    # Print class APs and mAP
+    ap_table = [["Index", "Class name", "AP"]]
+    for i, c in enumerate(ap_class):
+        ap_table += [[c, class_names[c], "%.5f" % AP[i]]]
+    print(AsciiTable(ap_table).table)
+    print(f"---- mAP {AP.mean()}")
+    return AP
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs", type=int, default=60, help="number of epochs")
-    parser.add_argument("--lr", type=float, default=1e-3, help="initial learning rate")
+    parser.add_argument('--max_epochs_1', default=10, type=int, help='number of total epochs to run in stage one')
+    parser.add_argument('--max_epochs_2', default=10, type=int, help='number of total epochs to run in total')
+    parser.add_argument("--freeze_body", type=int, default=2, help="frozen specific layers for stage one")
+    parser.add_argument("--lr", type=float, default=1e-4, help="initial learning rate for stage two")
     parser.add_argument("--batch_size", type=int, default=32, help="size of each image batch")
     parser.add_argument("--gradient_accumulations", type=int, default=2, help="number of gradient accums before step")
     parser.add_argument("--model_def", type=str, default="PyTorch-YOLOv3-ModelArts/config/yolov3-44.cfg", help="path to model definition file")
@@ -114,7 +244,6 @@ if __name__ == "__main__":
 
     opt = parser.parse_args()
     print(opt)
-
     opt = prepare_data_on_modelarts(opt)
 
     # logger = Logger("logs")
@@ -149,113 +278,38 @@ if __name__ == "__main__":
         collate_fn=dataset.collate_fn,
     )
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=opt.lr)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20)
-
-    metrics = [
-        "grid_size",
-        "loss",
-        "x",
-        "y",
-        "w",
-        "h",
-        "conf",
-        "cls",
-        "cls_acc",
-        "recall50",
-        "recall75",
-        "precision",
-        "conf_obj",
-        "conf_noobj",
-    ]
-
     # store the name of model with best mAP
     model_best = {'mAP': 0, 'name': ''}
 
-    for epoch in range(opt.epochs):
-        model.train()
-        start_time = time.time()
-        for batch_i, (_, imgs, targets) in enumerate(dataloader):
-            batches_done = len(dataloader) * epoch + batch_i
+    # first stage training to get a relatively stable model
+    optimizer_1 = torch.optim.Adam(freeze_body(model, opt.freeze_body), lr=1e-3)
+    for epoch in range(opt.max_epochs_1):
 
-            imgs = Variable(imgs.to(device))
-            targets = Variable(targets.to(device), requires_grad=False)
-
-            loss, outputs = model(imgs, targets)
-            loss.backward()
-
-            if batches_done % opt.gradient_accumulations:
-                # Accumulates gradient before each step
-                optimizer.step()
-                optimizer.zero_grad()
-
-            # ----------------
-            #   Log progress
-            # ----------------
-
-            log_str = "\n---- [Epoch %d/%d, Batch %d/%d] ----\n" % (epoch, opt.epochs, batch_i, len(dataloader))
-
-            metric_table = [["Metrics", *[f"YOLO Layer {i}" for i in range(len(model.yolo_layers))]]]
-
-            # Log metrics at each YOLO layer
-            for i, metric in enumerate(metrics):
-                formats = {m: "%.6f" for m in metrics}
-                formats["grid_size"] = "%2d"
-                formats["cls_acc"] = "%.2f%%"
-                row_metrics = [formats[metric] % yolo.metrics.get(metric, 0) for yolo in model.yolo_layers]
-                metric_table += [[metric, *row_metrics]]
-
-                '''
-                # Tensorboard logging
-                tensorboard_log = []
-                for j, yolo in enumerate(model.yolo_layers):
-                    for name, metric in yolo.metrics.items():
-                        if name != "grid_size":
-                            tensorboard_log += [(f"{name}_{j+1}", metric)]
-                tensorboard_log += [("loss", loss.item())]
-                logger.list_of_scalars_summary(tensorboard_log, batches_done)
-                '''
-
-            log_str += AsciiTable(metric_table).table
-            log_str += f"\nTotal loss {loss.item()}"
-
-            # Determine approximate time left for epoch
-            epoch_batches_left = len(dataloader) - (batch_i + 1)
-            time_left = datetime.timedelta(seconds=epoch_batches_left * (time.time() - start_time) / (batch_i + 1))
-            log_str += f"\n---- ETA {time_left}"
-
-            print(log_str)
-
-            model.seen += imgs.size(0)
+        train(model, dataloader, optimizer_1, epoch, opt, device)
 
         if epoch % opt.evaluation_interval == 0:
-            print("\n---- Evaluating Model ----")
-            # Evaluate the model on the validation set
-            precision, recall, AP, f1, ap_class = evaluate(
-                model,
-                path=valid_path,
-                iou_thres=0.5,
-                conf_thres=0.5,
-                nms_thres=0.5,
-                img_size=opt.img_size,
-                batch_size=32,
-            )
-            evaluation_metrics = [
-                ("val_precision", precision.mean()),
-                ("val_recall", recall.mean()),
-                ("val_mAP", AP.mean()),
-                ("val_f1", f1.mean()),
-            ]
-            # logger.list_of_scalars_summary(evaluation_metrics, epoch)
+            AP = valid(model, valid_path, class_names, opt)
 
-            # Print class APs and mAP
-            ap_table = [["Index", "Class name", "AP"]]
-            for i, c in enumerate(ap_class):
-                ap_table += [[c, class_names[c], "%.5f" % AP[i]]]
-            print(AsciiTable(ap_table).table)
-            print(f"---- mAP {AP.mean()}")
+            temp_model_name = f"ckpt_%d_%.2f.pth" % (epoch, 100 * AP.mean())
+            ckpt_name = os.path.join(opt.train_local, temp_model_name)
+            torch.save(model.state_dict(), ckpt_name)
+            mox.file.copy_parallel(ckpt_name, os.path.join(opt.train_url, temp_model_name))
 
-            temp_model_name = f"ckpt_%d_%.2f.pth" % (epoch, 100*AP.mean())
+            if AP.mean() > model_best['mAP']:
+                model_best['mAP'] = AP.mean()
+                model_best['name'] = ckpt_name
+
+    # second stage training to achieve higher mAP
+    optimizer_2 = torch.optim.Adam(freeze_body(model, 0), lr=opt.lr)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer_2, step_size=10)
+    for epoch in range(opt.max_epochs_1, opt.max_epochs_2):
+
+        train(model, dataloader, optimizer_2, epoch, opt, device)
+
+        if epoch % opt.evaluation_interval == 0:
+            AP = valid(model, valid_path, class_names, opt)
+
+            temp_model_name = f"ckpt_%d_%.2f.pth" % (epoch, 100 * AP.mean())
             ckpt_name = os.path.join(opt.train_local, temp_model_name)
             torch.save(model.state_dict(), ckpt_name)
             mox.file.copy_parallel(ckpt_name, os.path.join(opt.train_url, temp_model_name))
