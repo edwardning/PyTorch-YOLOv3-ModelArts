@@ -218,8 +218,8 @@ def valid(model, path, class_names, opt):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--max_epochs_1', default=10, type=int, help='number of total epochs to run in stage one')
-    parser.add_argument('--max_epochs_2', default=10, type=int, help='number of total epochs to run in total')
+    parser.add_argument('--max_epochs_1', default=5, type=int, help='number of total epochs to run in stage one')
+    parser.add_argument('--max_epochs_2', default=5, type=int, help='number of total epochs to run in total')
     parser.add_argument("--freeze_body", type=int, default=2, help="frozen specific layers for stage one")
     parser.add_argument("--lr", type=float, default=1e-4, help="initial learning rate for stage two")
     parser.add_argument("--batch_size", type=int, default=32, help="size of each image batch")
