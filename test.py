@@ -50,8 +50,18 @@ def evaluate(model, path, iou_thres, conf_thres, nms_thres, img_size, batch_size
         sample_metrics += get_batch_statistics(outputs, targets, iou_threshold=iou_thres)
 
     # Concatenate sample statistics
-    true_positives, pred_scores, pred_labels = [np.concatenate(x, 0) for x in list(zip(*sample_metrics))]
-    precision, recall, AP, f1, ap_class = ap_per_class(true_positives, pred_scores, pred_labels, labels)
+    if len(sample_metrics) > 0:
+        true_positives, pred_scores, pred_labels = [np.concatenate(x, 0) for x in list(zip(*sample_metrics))]
+        precision, recall, AP, f1, ap_class = ap_per_class(true_positives, pred_scores, pred_labels, labels)
+        assert len(ap_class) == len(AP)
+    else:
+        ap_class = np.unique(labels).astype("int32")
+        precision = np.zeros(len(ap_class), dtype=np.float)
+        recall = precision
+        AP = precision
+        f1 = 2 * precision * recall / (precision + recall + 1e-16)
+    # true_positives, pred_scores, pred_labels = [np.concatenate(x, 0) for x in list(zip(*sample_metrics))]
+    # precision, recall, AP, f1, ap_class = ap_per_class(true_positives, pred_scores, pred_labels, labels)
 
     return precision, recall, AP, f1, ap_class
 
