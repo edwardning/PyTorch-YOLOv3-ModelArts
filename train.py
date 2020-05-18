@@ -220,8 +220,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--max_epochs_1', default=5, type=int, help='number of total epochs to run in stage one')
     parser.add_argument('--max_epochs_2', default=5, type=int, help='number of total epochs to run in total')
-    parser.add_argument("--freeze_body", type=int, default=2, help="frozen specific layers for stage one")
-    parser.add_argument("--lr", type=float, default=1e-4, help="initial learning rate for stage two")
+    parser.add_argument("--freeze_body_1", type=int, default=2, help="frozen specific layers for stage one")
+    parser.add_argument("--freeze_body_2", type=int, default=0, help="frozen specific layers for stage two")
+    parser.add_argument("--lr_1", type=float, default=1e-3, help="initial learning rate for stage one")
+    parser.add_argument("--lr_2", type=float, default=1e-5, help="initial learning rate for stage two")
     parser.add_argument("--batch_size", type=int, default=32, help="size of each image batch")
     parser.add_argument("--gradient_accumulations", type=int, default=2, help="number of gradient accums before step")
     parser.add_argument("--model_def", type=str, default="PyTorch-YOLOv3-ModelArts/config/yolov3-44.cfg", help="path to model definition file")
@@ -282,7 +284,7 @@ if __name__ == "__main__":
     model_best = {'mAP': 0, 'name': ''}
 
     # first stage training to get a relatively stable model
-    optimizer_1 = torch.optim.Adam(freeze_body(model, opt.freeze_body), lr=1e-3)
+    optimizer_1 = torch.optim.Adam(freeze_body(model, opt.freeze_body_1), lr=opt.lr_1)
     for epoch in range(opt.max_epochs_1):
 
         train(model, dataloader, optimizer_1, epoch, opt, device)
@@ -300,7 +302,7 @@ if __name__ == "__main__":
                 model_best['name'] = ckpt_name
 
     # second stage training to achieve higher mAP
-    optimizer_2 = torch.optim.Adam(freeze_body(model, 0), lr=opt.lr)
+    optimizer_2 = torch.optim.Adam(freeze_body(model, opt.freeze_body_2), lr=opt.lr_2)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer_2, step_size=10)
     for epoch in range(opt.max_epochs_1, opt.max_epochs_2):
 
