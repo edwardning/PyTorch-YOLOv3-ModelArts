@@ -1,3 +1,14 @@
+# 运行成功后会生成如下目录结构的文件夹：
+# trainval/
+#    -images
+#        -0001.jpg
+#        -0002.jpg
+#        -0003.jpg
+#    -labels
+#        -0001.txt
+#        -0002.txt
+#        -0003.txt
+# 将trainval文件夹打包并命名为trainval.zip, 上传到OBS中以备使用。
 import os
 import codecs
 import xml.etree.ElementTree as ET
