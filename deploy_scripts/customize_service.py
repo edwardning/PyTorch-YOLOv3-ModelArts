@@ -83,7 +83,7 @@ class ObjectDetectionService(PTServingBaseService):
             detections = non_max_suppression(detections, self.score, self.iou)
 
         result = OrderedDict()
-        if detections is not None:
+        if detections[0] is not None:
             detections = rescale_boxes(detections[0], self.img_size, shape)
             detections = detections.numpy().tolist()
             out_classes = [x[6] for x in detections]
